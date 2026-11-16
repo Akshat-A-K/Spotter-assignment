@@ -6,3 +6,9 @@ scorer_results/
 *.joblib
 *.pkl
 .pytest_cache/
+models/
+train-test.csv
+validation.csv
+validation-predictions-template.csv
+december-chart-inputs.csv
+freight-rate-ml-assessment-1-.pdf
