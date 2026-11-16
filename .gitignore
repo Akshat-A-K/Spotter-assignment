@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+scorer_results/
+*.joblib
+*.pkl
+.pytest_cache/
