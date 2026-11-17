@@ -16,6 +16,7 @@ def main() -> None:
     parser.add_argument("--template", default="validation-predictions-template.csv")
     parser.add_argument("--output", default="validation_predictions.csv")
     parser.add_argument("--december", default="december-chart-inputs.csv")
+    parser.add_argument("--december-output", default="december_predictions.csv")
     args = parser.parse_args()
     model = load_model(Path(args.model))
     validation = pd.read_csv(args.validation)
@@ -39,10 +40,11 @@ def main() -> None:
     december_predictions = np.asarray(model.predict(december.drop(columns=["predicted_rate"])), dtype=float)
     if not np.isfinite(december_predictions).all() or (december_predictions <= 0).any():
         raise ValueError("December predictions must be finite and strictly positive")
-    december["predicted_rate"] = december_predictions
-    december.to_csv(args.december, index=False)
+    december_output = december.copy()
+    december_output["predicted_rate"] = december_predictions
+    december_output.to_csv(args.december_output, index=False)
     print(f"Wrote {len(template):,} predictions to {args.output}")
-    print(f"Wrote {len(december)} December predictions to {args.december}")
+    print(f"Wrote {len(december_output)} December predictions to {args.december_output}")
 
 
 if __name__ == "__main__":

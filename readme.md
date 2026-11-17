@@ -1,22 +1,20 @@
 # Spotter Freight Rate Prediction
 
-This repository predicts `posted_rate` for Spotter freight loads. The final model is a
-market-adjusted LightGBM regressor trained on the complete labeled development set
-after model selection on a chronological holdout. The report source is
-[reports/assessment_report.tex](reports/assessment_report.tex) and the compiled report is
-[reports/assessment_report.pdf](reports/assessment_report.pdf).
+This repository predicts `posted_rate` for Spotter freight loads. The final model
+is a market-adjusted LightGBM regressor selected with grouped chronological
+validation and refit on all labeled development rows.
 
 ## Data
 
 The supplied files must be present in the repository root:
 
-- `train-test.csv`: 48,000 labeled development rows, including `posted_rate`.
-- `validation.csv`: 12,000 unlabeled rows with `load_id`.
+- `train-test.csv`: 48,000 labeled rows from January 1 through October 31, 2025.
+- `validation.csv`: 12,000 unlabeled rows.
 - `validation-predictions-template.csv`: required output IDs and schema.
-- `december-chart-inputs.csv`: 31 fixed December chart inputs.
+- `december-chart-inputs.csv`: 31 fixed December chart inputs; never overwrite it.
 - `score.py`: official output validator and chart generator.
 
-## Setup and complete reproduction
+## Reproduction
 
 Use Python 3.10+:
 
@@ -24,51 +22,66 @@ Use Python 3.10+:
 python -m pip install -r requirements.txt
 python src/train.py --data train-test.csv
 python src/predict.py
-python score.py --predictions validation_predictions.csv \
-  --december-predictions december-chart-inputs.csv --output-dir reports/figures
+python score.py --predictions validation_predictions.csv ^
+  --december-predictions december_predictions.csv --output-dir reports/figures
 ```
 
-On Windows, the same workflow is available as `run.bat` (or run the commands above
-in PowerShell). `run.sh` is provided for Linux/macOS environments.
+On Windows, `run.bat` runs the same workflow. The final prediction files are
+`validation_predictions.csv` and `december_predictions.csv`.
 
-`src/train.py` sorts by date and holds out the latest 20% of unique dates. The
-current run uses development dates 2025-01-01 to 2025-09-01 for training and tuning,
-and 2025-09-02 to 2025-10-31 as the untouched holdout. It compares Ridge,
-ExtraTrees, RandomForest, HistGradientBoosting, CatBoost, LightGBM, and XGBoost.
-It uses `TimeSeriesSplit(n_splits=5)` and negative MAE scoring. Preprocessing is
-inside each sklearn pipeline, so imputers and encoders are fitted separately in
-each CV fold. It compares nine models: Ridge, LinearSVR, DecisionTree,
-RandomForest, ExtraTrees, HistGradientBoosting, CatBoost, LightGBM, and XGBoost.
-It writes `reports/model_comparison.csv`, saves the selected model to
-`models/best_model.joblib`, and creates three holdout diagnostic plots.
-`src/predict.py` applies the saved fit-only preprocessing to both prediction inputs,
-preserves template ID order, and fills the December input file.
+## Validation and model selection
+
+The latest 20% of unique development dates is kept as an untouched holdout:
+January 1 through September 1 are training/tuning dates, and September 2 through
+October 31 are final holdout dates. Before that holdout, selection uses four
+expanding monthly validation windows of 28 complete dates each. A date never
+appears in both training and validation in any fold. `reports/fold_metrics.csv`
+contains MAE, RMSE, and R2 for every model and fold.
+
+The experiment compares regularized Ridge, LinearSVR, DecisionTree,
+RandomForest, ExtraTrees, HistGradientBoosting, CatBoost, standard LightGBM,
+XGBoost, and market-adjusted LightGBM. The selected model is chosen by mean
+chronological CV MAE, then latest-window MAE. The actual run selected
+MarketAdjustedLGBM:
+
+- grouped CV MAE: **99.76**
+- latest grouped-CV MAE: **103.59**
+- untouched holdout MAE: **103.15**
+- untouched holdout RMSE: **633.96**
+- untouched holdout R2: **0.8280**
+
+Under the same corrected validation, XGBoost reached holdout MAE 108.15 and
+standard LightGBM 109.15. Results for all models and hyperparameters are in
+`reports/model_comparison.csv`.
+
+## Features and data quality
+
+The pipeline retains all observations, including 300 missing weights, 374 missing
+market-index values, and 292 negative weights in training. It uses missingness
+indicators, absolute weight, fold-fitted median imputation, route/city/equipment
+frequencies, haversine distance, geographic-distance ratio, route direction,
+date seasonality, and market/quote/weight/distance interactions. Frequency
+features are fitted inside each training fold and never use target values.
+Unseen validation cities and 736 unseen routes are handled safely by the
+categorical encoders and zero frequency.
+
+The extreme-rate rows were not capped or removed. The 67 holdout rows above
+$5/mile include 44 Dry Van, 16 Reefer, and 7 Flatbed rows, with no single
+equipment explanation. The largest 1% of holdout absolute residuals account for
+97.4% of squared error; `reports/residual_analysis.csv` preserves the detailed
+evidence for investigation.
 
 ## Outputs
 
 - `validation_predictions.csv`: exactly `load_id,predicted_rate`, 12,000 rows.
-- `december-chart-inputs.csv`: 31 fixed-input rows with positive predictions.
-- `reports/figures/candidate_december.png`: generated by the supplied `score.py`.
-- `reports/assessment_report.pdf`: technical assessment report with actual metrics and chart.
-- `reports/assessment_report.tex`: LaTeX source used to compile the PDF report.
-- `reports/model_comparison.csv`: reproducible model comparison.
-- `models/best_model.joblib`: serialized final model and encoder state.
+- `december_predictions.csv`: 31 fixed-input rows with predicted rates.
+- `reports/model_comparison.csv`: aggregate model and holdout metrics.
+- `reports/fold_metrics.csv`: fold-level chronological metrics.
+- `reports/residual_analysis.csv`: holdout residual diagnostics.
+- `reports/figures/residual_diagnostics.png`: residual plots.
+- `reports/figures/candidate_december.png`: chart from the supplied `score.py`.
+- `models/best_model.joblib`: serialized final model.
+- `models/model_metadata.json`: selection and date metadata.
 
-## Method summary
-
-Features include route, equipment, coordinates, distance, robust weight features,
-market and quote signals, missingness indicators, date components, cyclic seasonality,
-route coordinate deltas, and route frequency. Route frequency is fitted from the
-training fold only and does not use target values. Missing numeric values are median-imputed from training
-data only. Negative weights are retained as observed values but represented with an
-absolute-weight feature because removing rows would discard data without a defensible
-business rule. Unseen validation categories are safely encoded as all-zero columns.
-
-The market-adjusted model estimates a prior-date market level for log rate per
-mile, then predicts load-level residuals with LightGBM. It does not use target
-values from the prediction date. The chronological split is intentionally conservative because the production
-prediction set is later in time than the development observations. The model was
-selected on holdout MAE rather than training performance. Scaling is applied to
-linear and SVM models; tree and boosting models are not scaled because their split
-rules are insensitive to feature units. The market-adjusted LightGBM holdout
-MAE was 98.77, compared with 110.97 for the regularized LightGBM baseline.
+The prediction script validates positive finite predictions, preserves template
+ID order, and does not modify `december-chart-inputs.csv`.

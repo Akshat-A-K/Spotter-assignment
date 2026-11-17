@@ -1,39 +1,34 @@
 # 2–3 minute Loom script
 
-**Opening (15 seconds).** I built a reproducible freight-rate regression pipeline.
-The target is `posted_rate`; the final deliverable contains one positive prediction
-for each of the 12,000 validation loads.
+**Opening (15 seconds).** I built a reproducible freight-rate regression
+pipeline for 12,000 future Spotter loads. The final model is refit on all
+48,000 labeled development rows.
 
-**Data and quality (35 seconds).** The development data contains 48,000 rows and
-14 columns. It has pickup and delivery locations, coordinates, distance, equipment,
-weight, date, market index, quote signal, and the target. There are no duplicate
-rows. Weight and market index have missing values, and the data contains negative
-weights, so I retained every row, added missingness indicators, median-imputed
-numeric values using training data only, and added an absolute-weight feature rather
-than silently dropping observations.
+**Data quality (30 seconds).** The data contains missing weights and market
+indices, negative weights, unseen cities, and 736 unseen validation routes. I
+retained every row, added missingness and absolute-value features, and fitted
+imputation and frequency encodings inside each training fold. The validation
+set is never used to fit target-derived information.
 
-**Features and validation (35 seconds).** I created a route feature, route coordinate
-deltas, distance-per-weight, date components, cyclic day/month seasonality, and
-equipment/location indicators. Because the final prediction period is later than the
-development data, I sorted by date and used the latest 20% as a completely held-out
-chronological validation fold. The cutoff was 2025-08-31. This better tests future
-generalization than a random split.
+**Validation (30 seconds).** The previous row-based time split could place the
+same date in both sides of a fold. I replaced it with four expanding
+chronological monthly windows of 28 complete dates. The latest 20% of dates,
+September 2 through October 31, remains an untouched final holdout.
 
-**Models and selection (35 seconds).** I compared regularized Ridge, LinearSVR,
-DecisionTree, RandomForest, ExtraTrees, HistGradientBoosting, CatBoost, LightGBM,
-and XGBoost models using the same chronological holdout. I also tested a
-market-adjusted LightGBM that estimates a prior-date market level for log rate
-per mile and predicts the load-specific residual. This model performed best
-with MAE 98.77, RMSE 634.24, and R² 0.8279, so I refit it on all 48,000 labeled
-rows. Route frequency is learned from the training fold only, without target
-leakage. The comparison table and residual plots are in the reports directory.
+**Models (35 seconds).** I compared regularized linear, SVM, single-tree,
+random-forest, extra-trees, histogram-gradient, CatBoost, XGBoost, standard
+LightGBM, and a market-adjusted LightGBM. The market-adjusted model estimates a
+prior-date market level for log rate per mile and learns the load-level residual.
+It won grouped CV with MAE 99.76 and achieved holdout MAE 103.15, versus 108.15
+for XGBoost and 109.15 for standard LightGBM.
 
-**Outputs (25 seconds).** The saved model predicts the validation template in exact
-load ID order and writes `validation_predictions.csv`. It also predicts the 31
-fixed December inputs. Finally, I run the supplied `score.py`; it validates both
-schemas and generates `reports/figures/candidate_december.png`. The scorer passed
-with 12,000 validation predictions and 31 December predictions.
+**Extreme errors (25 seconds).** The high-rate observations are distributed
+across Dry Van, Reefer, and Flatbed, so I did not cap or delete them. The largest
+1% of holdout residuals account for 97.4% of squared error; those rows are
+preserved in `reports/residual_analysis.csv` for auditability.
 
-**Close (10 seconds).** The workflow is reproducible with the commands in README.md,
-and the PDF report documents the data, methodology, actual results, limitations, and
-the generated chart.
+**Outputs (25 seconds).** `src/predict.py` writes
+`validation_predictions.csv` and a separate `december_predictions.csv`. It
+preserves template ID order, checks finite positive predictions, and never
+overwrites `december-chart-inputs.csv`. Finally, the supplied `score.py`
+validates both files and generates the December chart.

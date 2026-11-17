@@ -27,10 +27,14 @@ NUMERIC = [
     "pickup_lat", "pickup_lon", "delivery_lat", "delivery_lon", "distance",
     "weight", "market_index", "quote_signal", "weight_missing", "market_missing",
     "weight_abs", "distance_per_weight", "route_lat_delta", "route_lon_delta",
+    "haversine_miles", "distance_ratio", "route_bearing_sin", "route_bearing_cos",
+    "distance_log", "weight_log", "market_log", "market_quote_interaction",
+    "market_days_interaction", "quote_distance_interaction",
     "day_of_year", "day_of_week", "month", "day", "days_since_start",
     "day_sin", "day_cos", "month_sin", "month_cos",
     "distance_weight_interaction", "weight_per_distance",
-    "route_frequency",
+    "route_frequency", "pickup_frequency", "delivery_frequency",
+    "equipment_frequency", "route_equipment_frequency",
 ]
 
 
@@ -54,6 +58,21 @@ def make_features(frame: pd.DataFrame) -> pd.DataFrame:
     out["distance_per_weight"] = out["distance"] / out["weight_abs"].clip(lower=1000)
     out["route_lat_delta"] = out["delivery_lat"] - out["pickup_lat"]
     out["route_lon_delta"] = out["delivery_lon"] - out["pickup_lon"]
+    lat1 = np.radians(out["pickup_lat"])
+    lat2 = np.radians(out["delivery_lat"])
+    delta_lat = lat2 - lat1
+    delta_lon = np.radians(out["delivery_lon"] - out["pickup_lon"])
+    haversine_a = (
+        np.sin(delta_lat / 2.0) ** 2
+        + np.cos(lat1) * np.cos(lat2) * np.sin(delta_lon / 2.0) ** 2
+    )
+    out["haversine_miles"] = 3958.7613 * 2.0 * np.arcsin(np.sqrt(haversine_a.clip(0.0, 1.0)))
+    out["distance_ratio"] = out["distance"] / out["haversine_miles"].clip(lower=1.0)
+    out["route_bearing_sin"] = np.sin(np.arctan2(delta_lon, delta_lat))
+    out["route_bearing_cos"] = np.cos(np.arctan2(delta_lon, delta_lat))
+    out["distance_log"] = np.log1p(out["distance"].clip(lower=0.0))
+    out["weight_log"] = np.log1p(out["weight_abs"].clip(lower=0.0))
+    out["market_log"] = np.log1p(out["market_index"].clip(lower=0.0))
     out["day_of_year"] = date.dt.dayofyear
     out["day_of_week"] = date.dt.dayofweek
     out["month"] = date.dt.month
@@ -65,7 +84,14 @@ def make_features(frame: pd.DataFrame) -> pd.DataFrame:
     out["month_cos"] = np.cos(2 * np.pi * out["month"] / 12)
     out["distance_weight_interaction"] = out["distance"] * out["weight_abs"] / 100000
     out["weight_per_distance"] = out["weight_abs"] / out["distance"].clip(lower=1)
+    out["market_quote_interaction"] = out["market_index"] * out["quote_signal"]
+    out["market_days_interaction"] = out["market_index"] * out["days_since_start"]
+    out["quote_distance_interaction"] = out["quote_signal"] * out["distance_log"]
     out["route_frequency"] = 0.0
+    out["pickup_frequency"] = 0.0
+    out["delivery_frequency"] = 0.0
+    out["equipment_frequency"] = 0.0
+    out["route_equipment_frequency"] = 0.0
     return out[CATEGORICAL + NUMERIC]
 
 
@@ -87,14 +113,29 @@ def preprocessing() -> ColumnTransformer:
     ])
 
 
-class RouteFrequency(BaseEstimator, TransformerMixin):
+class FrequencyFeatures(BaseEstimator, TransformerMixin):
     def fit(self, frame: pd.DataFrame, y=None):
-        self.counts_ = frame["route"].value_counts()
+        self.counts_ = {
+            "route_frequency": frame["route"].value_counts(),
+            "pickup_frequency": frame["pickup"].value_counts(),
+            "delivery_frequency": frame["delivery"].value_counts(),
+            "equipment_frequency": frame["equipment"].value_counts(),
+            "route_equipment_frequency": (
+                frame["route"] + " | " + frame["equipment"]
+            ).value_counts(),
+        }
         return self
 
     def transform(self, frame: pd.DataFrame) -> pd.DataFrame:
         out = frame.copy()
-        out["route_frequency"] = out["route"].map(self.counts_).fillna(0).astype(float)
+        out["route_frequency"] = out["route"].map(self.counts_["route_frequency"]).fillna(0).astype(float)
+        out["pickup_frequency"] = out["pickup"].map(self.counts_["pickup_frequency"]).fillna(0).astype(float)
+        out["delivery_frequency"] = out["delivery"].map(self.counts_["delivery_frequency"]).fillna(0).astype(float)
+        out["equipment_frequency"] = out["equipment"].map(self.counts_["equipment_frequency"]).fillna(0).astype(float)
+        route_equipment = out["route"] + " | " + out["equipment"]
+        out["route_equipment_frequency"] = route_equipment.map(
+            self.counts_["route_equipment_frequency"]
+        ).fillna(0).astype(float)
         return out
 
 
@@ -171,7 +212,7 @@ class MarketAdjustedRegressor(BaseEstimator, RegressorMixin):
 def standard_model(estimator) -> Pipeline:
     return Pipeline([
         ("features", FunctionTransformer(make_features, validate=False)),
-        ("route_frequency", RouteFrequency()),
+        ("frequency_features", FrequencyFeatures()),
         ("preprocess", preprocessing()),
         ("model", estimator),
     ])
@@ -188,7 +229,7 @@ def catboost_model() -> Pipeline:
     )
     return Pipeline([
         ("features", FunctionTransformer(make_features, validate=False)),
-        ("route_frequency", RouteFrequency()),
+        ("frequency_features", FrequencyFeatures()),
         ("model", estimator),
     ])
 
@@ -198,7 +239,7 @@ def candidate_models() -> dict[str, tuple[Pipeline, dict]]:
         "Ridge": (
             Pipeline([
                 ("features", FunctionTransformer(make_features, validate=False)),
-                ("route_frequency", RouteFrequency()),
+                ("frequency_features", FrequencyFeatures()),
                 ("preprocess", preprocessing()),
                 ("scale", StandardScaler()),
                 ("model", Ridge()),
