@@ -10,6 +10,8 @@ from catboost import CatBoostRegressor
 from lightgbm import LGBMRegressor
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import ExtraTreesRegressor, HistGradientBoostingRegressor, RandomForestRegressor
+from sklearn.svm import LinearSVR
+from sklearn.tree import DecisionTreeRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
@@ -116,6 +118,19 @@ def candidate_models() -> dict[str, tuple[Pipeline, dict]]:
             ]),
             {"model__alpha": [1.0, 10.0, 30.0]},
         ),
+        "DecisionTreeRegressor": (
+            standard_model(DecisionTreeRegressor(random_state=RANDOM_STATE)),
+            {"model__max_depth": [8, 16], "model__min_samples_leaf": [2, 10], "model__ccp_alpha": [0.0, 0.001]},
+        ),
+        "LinearSVR": (
+            Pipeline([
+                ("features", FunctionTransformer(make_features, validate=False)),
+                ("preprocess", preprocessing()),
+                ("scale", StandardScaler()),
+                ("model", LinearSVR(random_state=RANDOM_STATE, max_iter=10000, dual="auto")),
+            ]),
+            {"model__C": [0.1, 1.0, 10.0], "model__epsilon": [0.1, 10.0]},
+        ),
         "ExtraTreesRegressor": (
             standard_model(ExtraTreesRegressor(random_state=RANDOM_STATE, n_jobs=1)),
             {"model__n_estimators": [300], "model__min_samples_leaf": [1, 2], "model__max_features": [0.8]},
@@ -134,7 +149,15 @@ def candidate_models() -> dict[str, tuple[Pipeline, dict]]:
         ),
         "LGBMRegressor": (
             standard_model(LGBMRegressor(objective="regression_l1", random_state=RANDOM_STATE, n_jobs=1, verbosity=-1)),
-            {"model__n_estimators": [300], "model__learning_rate": [0.03, 0.05], "model__num_leaves": [15, 31], "model__max_depth": [-1], "model__min_child_samples": [20], "model__reg_lambda": [1]},
+            {
+                "model__n_estimators": [300, 600],
+                "model__learning_rate": [0.02, 0.03],
+                "model__num_leaves": [31],
+                "model__max_depth": [-1],
+                "model__min_child_samples": [20, 30],
+                "model__reg_lambda": [1, 5],
+                "model__reg_alpha": [0, 1],
+            },
         ),
         "XGBRegressor": (
             standard_model(XGBRegressor(objective="reg:absoluteerror", random_state=RANDOM_STATE, n_jobs=1, tree_method="hist")),
