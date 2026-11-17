@@ -17,7 +17,7 @@
 The objective is to predict \texttt{posted\_rate} for all 12,000 loads in the
 provided validation file. The final model is LightGBM, selected only after
 comparison on a completely untouched future-date holdout. The final holdout MAE
-is 111.41.
+is 110.97.
 
 \section*{Data and quality checks}
 The development file contains 48,000 rows from 1 January 2025 to 31 October 2025.
@@ -31,7 +31,8 @@ missingness indicator.
 \section*{Feature engineering}
 The pipeline creates pickup and delivery route, coordinate differences, date
 components, cyclic seasonal features, distance per absolute weight, weight per
-distance, and a distance--weight interaction. The original distance, coordinates,
+distance, a distance--weight interaction, and route frequency learned from the
+training fold. The original distance, coordinates,
 equipment, weight, market index, and quote signal are also retained. Scaling is
 used for Ridge and LinearSVR; tree models do not need scaling, so scaling is not
 forced where it would not help.
@@ -66,15 +67,15 @@ regularisation to improve generalisation.
 \toprule
 Model & CV MAE & Holdout MAE & RMSE & R-squared & MAPE (\%)\\
 \midrule
-LGBMRegressor & 115.38 & 111.41 & 640.49 & 0.8244 & 4.83\\
-XGBRegressor & 119.29 & 121.37 & 642.76 & 0.8232 & 5.28\\
-CatBoostRegressor & 116.74 & 121.72 & 643.10 & 0.8230 & 5.28\\
-HistGradientBoostingRegressor & 153.14 & 123.93 & 641.60 & 0.8238 & 5.54\\
-ExtraTreesRegressor & 152.61 & 135.07 & 645.08 & 0.8219 & 5.93\\
-RandomForestRegressor & 199.34 & 150.45 & 652.55 & 0.8178 & 6.64\\
+LGBMRegressor & 115.82 & 110.97 & 640.34 & 0.8245 & 4.83\\
+XGBRegressor & 118.52 & 121.28 & 642.80 & 0.8232 & 5.28\\
+HistGradientBoostingRegressor & 155.05 & 122.64 & 640.58 & 0.8244 & 5.54\\
+CatBoostRegressor & 118.54 & 124.28 & 643.42 & 0.8228 & 5.50\\
+ExtraTreesRegressor & 150.90 & 133.11 & 643.54 & 0.8228 & 5.90\\
+RandomForestRegressor & 197.57 & 147.23 & 649.97 & 0.8192 & 6.58\\
 LinearSVR & 137.73 & 153.98 & 648.96 & 0.8198 & 8.12\\
-DecisionTreeRegressor & 231.32 & 158.82 & 661.07 & 0.8130 & 7.02\\
-Ridge & 165.41 & 172.80 & 652.83 & 0.8176 & 9.83\\
+DecisionTreeRegressor & 233.85 & 175.78 & 672.95 & 0.8062 & 7.73\\
+Ridge & 165.72 & 172.54 & 652.75 & 0.8177 & 9.82\\
 \bottomrule
 \end{tabular}
 \end{table}

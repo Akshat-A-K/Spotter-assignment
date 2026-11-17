@@ -17,6 +17,7 @@ from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, OrdinalEncoder, StandardScaler
 from xgboost import XGBRegressor
+from sklearn.base import BaseEstimator, TransformerMixin
 
 
 RANDOM_STATE = 42
@@ -29,6 +30,7 @@ NUMERIC = [
     "day_of_year", "day_of_week", "month", "day", "days_since_start",
     "day_sin", "day_cos", "month_sin", "month_cos",
     "distance_weight_interaction", "weight_per_distance",
+    "route_frequency",
 ]
 
 
@@ -63,6 +65,7 @@ def make_features(frame: pd.DataFrame) -> pd.DataFrame:
     out["month_cos"] = np.cos(2 * np.pi * out["month"] / 12)
     out["distance_weight_interaction"] = out["distance"] * out["weight_abs"] / 100000
     out["weight_per_distance"] = out["weight_abs"] / out["distance"].clip(lower=1)
+    out["route_frequency"] = 0.0
     return out[CATEGORICAL + NUMERIC]
 
 
@@ -84,9 +87,21 @@ def preprocessing() -> ColumnTransformer:
     ])
 
 
+class RouteFrequency(BaseEstimator, TransformerMixin):
+    def fit(self, frame: pd.DataFrame, y=None):
+        self.counts_ = frame["route"].value_counts()
+        return self
+
+    def transform(self, frame: pd.DataFrame) -> pd.DataFrame:
+        out = frame.copy()
+        out["route_frequency"] = out["route"].map(self.counts_).fillna(0).astype(float)
+        return out
+
+
 def standard_model(estimator) -> Pipeline:
     return Pipeline([
         ("features", FunctionTransformer(make_features, validate=False)),
+        ("route_frequency", RouteFrequency()),
         ("preprocess", preprocessing()),
         ("model", estimator),
     ])
@@ -103,6 +118,7 @@ def catboost_model() -> Pipeline:
     )
     return Pipeline([
         ("features", FunctionTransformer(make_features, validate=False)),
+        ("route_frequency", RouteFrequency()),
         ("model", estimator),
     ])
 
@@ -112,6 +128,7 @@ def candidate_models() -> dict[str, tuple[Pipeline, dict]]:
         "Ridge": (
             Pipeline([
                 ("features", FunctionTransformer(make_features, validate=False)),
+                ("route_frequency", RouteFrequency()),
                 ("preprocess", preprocessing()),
                 ("scale", StandardScaler()),
                 ("model", Ridge()),
@@ -151,11 +168,11 @@ def candidate_models() -> dict[str, tuple[Pipeline, dict]]:
             standard_model(LGBMRegressor(objective="regression_l1", random_state=RANDOM_STATE, n_jobs=1, verbosity=-1)),
             {
                 "model__n_estimators": [300, 600],
-                "model__learning_rate": [0.02, 0.03],
-                "model__num_leaves": [31],
+                "model__learning_rate": [0.03],
+                "model__num_leaves": [31, 63],
                 "model__max_depth": [-1],
-                "model__min_child_samples": [20, 30],
-                "model__reg_lambda": [1, 5],
+                "model__min_child_samples": [30],
+                "model__reg_lambda": [5, 10],
                 "model__reg_alpha": [0, 1],
             },
         ),

@@ -22,9 +22,10 @@ generalization than a random split.
 **Models and selection (35 seconds).** I compared regularized Ridge, LinearSVR,
 DecisionTree, RandomForest, ExtraTrees, HistGradientBoosting, CatBoost, LightGBM,
 and XGBoost models using the same chronological holdout. The selected LightGBM
-model performed best with MAE 111.41, RMSE 640.49, and R² 0.8244, so I refit it
-on all 48,000 labeled rows. The comparison table and residual plots are in the
-reports directory.
+model performed best with MAE 110.97, RMSE 640.34, and R² 0.8245, so I refit it
+on all 48,000 labeled rows. I also added route frequency learned from the training
+fold only, without target leakage. The comparison table and residual plots are in
+the reports directory.
 
 **Outputs (25 seconds).** The saved model predicts the validation template in exact
 load ID order and writes `validation_predictions.csv`. It also predicts the 31

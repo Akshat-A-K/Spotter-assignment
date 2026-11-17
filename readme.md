@@ -58,7 +58,8 @@ preserves template ID order, and fills the December input file.
 
 Features include route, equipment, coordinates, distance, robust weight features,
 market and quote signals, missingness indicators, date components, cyclic seasonality,
-and route coordinate deltas. Missing numeric values are median-imputed from training
+route coordinate deltas, and route frequency. Route frequency is fitted from the
+training fold only and does not use target values. Missing numeric values are median-imputed from training
 data only. Negative weights are retained as observed values but represented with an
 absolute-weight feature because removing rows would discard data without a defensible
 business rule. Unseen validation categories are safely encoded as all-zero columns.
@@ -67,4 +68,5 @@ The chronological split is intentionally conservative because the production
 prediction set is later in time than the development observations. The model was
 selected on holdout MAE rather than training performance. Scaling is applied to
 linear and SVM models; tree and boosting models are not scaled because their split
-rules are insensitive to feature units. The final LightGBM holdout MAE was 111.41.
+rules are insensitive to feature units. The final LightGBM holdout MAE after adding
+the fold-safe route-frequency feature was 110.97.
