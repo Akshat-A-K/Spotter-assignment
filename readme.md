@@ -1,7 +1,7 @@
 # Spotter Freight Rate Prediction
 
 This repository predicts `posted_rate` for Spotter freight loads. The final model is a
-LightGBM regressor trained on the complete labeled development set after
+regularized LightGBM regressor trained on the complete labeled development set after
 model selection on a chronological holdout. The report source is
 [reports/assessment_report.tex](reports/assessment_report.tex) and the compiled report is
 [reports/assessment_report.pdf](reports/assessment_report.pdf).
@@ -37,8 +37,10 @@ and 2025-09-02 to 2025-10-31 as the untouched holdout. It compares Ridge,
 ExtraTrees, RandomForest, HistGradientBoosting, CatBoost, LightGBM, and XGBoost.
 It uses `TimeSeriesSplit(n_splits=5)` and negative MAE scoring. Preprocessing is
 inside each sklearn pipeline, so imputers and encoders are fitted separately in
-each CV fold. It writes `reports/model_comparison.csv`, saves the selected model
-to `models/best_model.joblib`, and creates three holdout diagnostic plots.
+each CV fold. It compares nine models: Ridge, LinearSVR, DecisionTree,
+RandomForest, ExtraTrees, HistGradientBoosting, CatBoost, LightGBM, and XGBoost.
+It writes `reports/model_comparison.csv`, saves the selected model to
+`models/best_model.joblib`, and creates three holdout diagnostic plots.
 `src/predict.py` applies the saved fit-only preprocessing to both prediction inputs,
 preserves template ID order, and fills the December input file.
 
@@ -63,4 +65,6 @@ business rule. Unseen validation categories are safely encoded as all-zero colum
 
 The chronological split is intentionally conservative because the production
 prediction set is later in time than the development observations. The model was
-selected on holdout MAE/RMSE rather than training performance.
+selected on holdout MAE rather than training performance. Scaling is applied to
+linear and SVM models; tree and boosting models are not scaled because their split
+rules are insensitive to feature units. The final LightGBM holdout MAE was 111.41.

@@ -16,7 +16,8 @@
 \section*{Objective}
 The objective is to predict \texttt{posted\_rate} for all 12,000 loads in the
 provided validation file. The final model is LightGBM, selected only after
-comparison on a completely untouched future-date holdout.
+comparison on a completely untouched future-date holdout. The final holdout MAE
+is 111.41.
 
 \section*{Data and quality checks}
 The development file contains 48,000 rows from 1 January 2025 to 31 October 2025.
@@ -31,7 +32,9 @@ missingness indicator.
 The pipeline creates pickup and delivery route, coordinate differences, date
 components, cyclic seasonal features, distance per absolute weight, weight per
 distance, and a distance--weight interaction. The original distance, coordinates,
-equipment, weight, market index, and quote signal are also retained.
+equipment, weight, market index, and quote signal are also retained. Scaling is
+used for Ridge and LinearSVR; tree models do not need scaling, so scaling is not
+forced where it would not help.
 
 All non-CatBoost models use a sklearn \texttt{ColumnTransformer}. Numeric values
 are median-imputed and categorical values are imputed and ordinal encoded. These
@@ -49,9 +52,10 @@ hyperparameter tuning, or model selection.
 
 The earlier period used \texttt{TimeSeriesSplit(n\_splits=5)} and
 \texttt{GridSearchCV} with negative MAE scoring. Each estimator used one worker
-inside the search to avoid CPU oversubscription. The selected LightGBM settings
-were 300 estimators, learning rate 0.03, 31 leaves, unlimited depth, 20 minimum
-child samples, and L2 regularisation 1.
+inside the search to avoid CPU oversubscription. The selected LightGBM settings were 600 estimators, learning rate 0.03, 31
+leaves, unlimited depth, 30 minimum child samples, L1 regularisation 0, and L2
+regularisation 5. The larger tree count uses a lower learning rate and stronger
+regularisation to improve generalisation.
 
 \section*{Model comparison}
 \begin{table}[h]
@@ -62,12 +66,14 @@ child samples, and L2 regularisation 1.
 \toprule
 Model & CV MAE & Holdout MAE & RMSE & R-squared & MAPE (\%)\\
 \midrule
-LGBMRegressor & 116.57 & 116.15 & 642.17 & 0.8235 & 5.02\\
+LGBMRegressor & 115.38 & 111.41 & 640.49 & 0.8244 & 4.83\\
 XGBRegressor & 119.29 & 121.37 & 642.76 & 0.8232 & 5.28\\
 CatBoostRegressor & 116.74 & 121.72 & 643.10 & 0.8230 & 5.28\\
 HistGradientBoostingRegressor & 153.14 & 123.93 & 641.60 & 0.8238 & 5.54\\
 ExtraTreesRegressor & 152.61 & 135.07 & 645.08 & 0.8219 & 5.93\\
 RandomForestRegressor & 199.34 & 150.45 & 652.55 & 0.8178 & 6.64\\
+LinearSVR & 137.73 & 153.98 & 648.96 & 0.8198 & 8.12\\
+DecisionTreeRegressor & 231.32 & 158.82 & 661.07 & 0.8130 & 7.02\\
 Ridge & 165.41 & 172.80 & 652.83 & 0.8176 & 9.83\\
 \bottomrule
 \end{tabular}
@@ -75,7 +81,9 @@ Ridge & 165.41 & 172.80 & 652.83 & 0.8176 & 9.83\\
 
 LightGBM was selected because it has the lowest holdout MAE. XGBoost and CatBoost
 are close, which gives confidence that the result is not dependent on one
-algorithm family. The final selected pipeline was then reinitialised and fitted
+algorithm family. The linear and single-tree models are useful explanations and
+baselines, but their larger errors show that the nonlinear boosted models are
+needed. The final selected pipeline was then reinitialised and fitted
 on all 48,000 labelled rows.
 
 \section*{Error analysis}
