@@ -15,9 +15,9 @@
 
 \section*{Objective}
 The objective is to predict \texttt{posted\_rate} for all 12,000 loads in the
-provided validation file. The final model is LightGBM, selected only after
-comparison on a completely untouched future-date holdout. The final holdout MAE
-is 110.97.
+provided validation file. The final model is market-adjusted LightGBM, selected
+only after comparison on a completely untouched future-date holdout. The final
+holdout MAE is 98.77.
 
 \section*{Data and quality checks}
 The development file contains 48,000 rows from 1 January 2025 to 31 October 2025.
@@ -43,6 +43,15 @@ steps are inside the sklearn pipeline, so every CV training fold learns its own
 preprocessing. CatBoost receives the categorical columns directly. The date and
 load identifier are not passed as raw model features.
 
+\section*{Market adjustment}
+Freight rates move with the market, so the model first calculates the daily
+median log rate per mile using only clean labels between 1.2 and 5.0 dollars
+per mile. For each training date, the market level is estimated from earlier
+dates only. A LightGBM model then predicts the load-level residual around that
+level. Final predictions reconstruct a positive rate from the predicted level,
+residual, and distance. This uses no target information from the prediction
+date.
+
 \section*{Chronological validation}
 Rows were sorted by date and load ID. There are 304 unique dates. The first 243
 dates were used for training and tuning, from 1 January 2025 through 1 September
@@ -53,8 +62,8 @@ hyperparameter tuning, or model selection.
 
 The earlier period used \texttt{TimeSeriesSplit(n\_splits=5)} and
 \texttt{GridSearchCV} with negative MAE scoring. Each estimator used one worker
-inside the search to avoid CPU oversubscription. The selected LightGBM settings were 600 estimators, learning rate 0.03, 31
-leaves, unlimited depth, 30 minimum child samples, L1 regularisation 0, and L2
+inside the search to avoid CPU oversubscription. The selected residual LightGBM settings were 600 estimators, learning rate 0.03, 31
+leaves, 30 minimum child samples, L1 regularisation 0, and L2
 regularisation 5. The larger tree count uses a lower learning rate and stronger
 regularisation to improve generalisation.
 
@@ -67,6 +76,7 @@ regularisation to improve generalisation.
 \toprule
 Model & CV MAE & Holdout MAE & RMSE & R-squared & MAPE (\%)\\
 \midrule
+MarketAdjustedLGBM & 150.24 & 98.77 & 634.24 & 0.8279 & 4.45\\
 LGBMRegressor & 115.82 & 110.97 & 640.34 & 0.8245 & 4.83\\
 XGBRegressor & 118.52 & 121.28 & 642.80 & 0.8232 & 5.28\\
 HistGradientBoostingRegressor & 155.05 & 122.64 & 640.58 & 0.8244 & 5.54\\
@@ -80,7 +90,8 @@ Ridge & 165.72 & 172.54 & 652.75 & 0.8177 & 9.82\\
 \end{tabular}
 \end{table}
 
-LightGBM was selected because it has the lowest holdout MAE. XGBoost and CatBoost
+Market-adjusted LightGBM was selected because it has the lowest holdout MAE.
+XGBoost and CatBoost
 are close, which gives confidence that the result is not dependent on one
 algorithm family. The linear and single-tree models are useful explanations and
 baselines, but their larger errors show that the nonlinear boosted models are

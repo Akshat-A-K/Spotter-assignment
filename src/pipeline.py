@@ -17,7 +17,7 @@ from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, OrdinalEncoder, StandardScaler
 from xgboost import XGBRegressor
-from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.base import BaseEstimator, RegressorMixin, TransformerMixin, clone
 
 
 RANDOM_STATE = 42
@@ -98,6 +98,76 @@ class RouteFrequency(BaseEstimator, TransformerMixin):
         return out
 
 
+class MarketAdjustedRegressor(BaseEstimator, RegressorMixin):
+    def __init__(self, base_estimator=None, clean_low=1.2, clean_high=5.0, level_alpha=10.0):
+        self.base_estimator = base_estimator
+        self.clean_low = clean_low
+        self.clean_high = clean_high
+        self.level_alpha = level_alpha
+
+    @staticmethod
+    def _level_features(frame: pd.DataFrame, market_mean: float, columns=None) -> pd.DataFrame:
+        result = pd.DataFrame(index=frame.index)
+        market = frame["market_index"] if "market_index" in frame else pd.Series(market_mean, index=frame.index)
+        result["market"] = pd.to_numeric(market, errors="coerce").fillna(market_mean)
+        result["days"] = (pd.to_datetime(frame["date"]) - pd.Timestamp("2025-01-01")).dt.days
+        result["month"] = pd.to_datetime(frame["date"]).dt.month
+        result = pd.get_dummies(result, columns=["month"], dtype=float)
+        if columns is not None:
+            result = result.reindex(columns=columns, fill_value=0.0)
+        return result.astype(float)
+
+    def _daily_table(self, frame: pd.DataFrame, target: pd.Series) -> pd.DataFrame:
+        daily = frame[["date", "market_index", "distance"]].copy()
+        daily["log_rate_per_mile"] = np.log(target.to_numpy() / daily["distance"].clip(lower=1).to_numpy())
+        daily["clean"] = np.exp(daily["log_rate_per_mile"]).between(self.clean_low, self.clean_high)
+        daily = daily[daily["clean"]].copy()
+        return daily.groupby("date", as_index=False).agg(
+            level=("log_rate_per_mile", "median"),
+            market=("market_index", "mean"),
+        )
+
+    def fit(self, frame: pd.DataFrame, target: pd.Series):
+        data = frame.copy()
+        data["date"] = pd.to_datetime(data["date"])
+        self.market_mean_ = float(pd.to_numeric(data["market_index"], errors="coerce").mean())
+        daily = self._daily_table(data, target)
+        daily_frame = daily.rename(columns={"market": "market_index"})
+        self.level_columns_ = list(self._level_features(daily_frame, self.market_mean_).columns)
+        rolling_levels = {}
+        for date in daily["date"].sort_values():
+            prior = daily[daily["date"] < date]
+            if len(prior) < 20:
+                rolling_levels[date] = float(prior["level"].median() if len(prior) else daily["level"].median())
+                continue
+            prior_frame = prior.rename(columns={"market": "market_index"})
+            features = self._level_features(prior_frame, self.market_mean_, self.level_columns_)
+            level_model = Ridge(alpha=self.level_alpha).fit(features, prior["level"])
+            current = pd.DataFrame([{"date": date, "market_index": daily.loc[daily["date"] == date, "market"].iloc[0]}])
+            current_features = self._level_features(current, self.market_mean_, self.level_columns_)
+            rolling_levels[date] = float(level_model.predict(current_features)[0])
+        train_levels = data["date"].map(rolling_levels).fillna(float(daily["level"].median())).to_numpy()
+        rates = target.to_numpy() / data["distance"].clip(lower=1).to_numpy()
+        clean = (rates >= self.clean_low) & (rates <= self.clean_high)
+        self.level_model_ = Ridge(alpha=self.level_alpha).fit(
+            self._level_features(daily_frame, self.market_mean_, self.level_columns_),
+            daily["level"],
+        )
+        residual_target = np.log(rates) - train_levels
+        self.base_estimator_ = clone(self.base_estimator)
+        self.base_estimator_.fit(data.loc[clean], pd.Series(residual_target[clean], index=data.index[clean]))
+        return self
+
+    def predict(self, frame: pd.DataFrame) -> np.ndarray:
+        data = frame.copy()
+        data["date"] = pd.to_datetime(data["date"])
+        levels = self.level_model_.predict(
+            self._level_features(data, self.market_mean_, self.level_columns_)
+        )
+        residual = self.base_estimator_.predict(data)
+        return np.maximum(np.exp(residual + levels) * data["distance"].to_numpy(), 1e-6)
+
+
 def standard_model(estimator) -> Pipeline:
     return Pipeline([
         ("features", FunctionTransformer(make_features, validate=False)),
@@ -174,6 +244,26 @@ def candidate_models() -> dict[str, tuple[Pipeline, dict]]:
                 "model__min_child_samples": [30],
                 "model__reg_lambda": [5, 10],
                 "model__reg_alpha": [0, 1],
+            },
+        ),
+        "MarketAdjustedLGBM": (
+            MarketAdjustedRegressor(
+                base_estimator=standard_model(LGBMRegressor(
+                    objective="regression_l1",
+                    random_state=RANDOM_STATE,
+                    n_jobs=1,
+                    verbosity=-1,
+                ))
+            ),
+            {
+                "base_estimator__model__n_estimators": [600],
+                "base_estimator__model__learning_rate": [0.03],
+                "base_estimator__model__num_leaves": [31],
+                "base_estimator__model__min_child_samples": [30],
+                "base_estimator__model__reg_lambda": [5],
+                "base_estimator__model__reg_alpha": [0],
+                "clean_low": [1.2],
+                "clean_high": [5.0],
             },
         ),
         "XGBRegressor": (

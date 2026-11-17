@@ -1,8 +1,8 @@
 # Spotter Freight Rate Prediction
 
 This repository predicts `posted_rate` for Spotter freight loads. The final model is a
-regularized LightGBM regressor trained on the complete labeled development set after
-model selection on a chronological holdout. The report source is
+market-adjusted LightGBM regressor trained on the complete labeled development set
+after model selection on a chronological holdout. The report source is
 [reports/assessment_report.tex](reports/assessment_report.tex) and the compiled report is
 [reports/assessment_report.pdf](reports/assessment_report.pdf).
 
@@ -64,9 +64,11 @@ data only. Negative weights are retained as observed values but represented with
 absolute-weight feature because removing rows would discard data without a defensible
 business rule. Unseen validation categories are safely encoded as all-zero columns.
 
-The chronological split is intentionally conservative because the production
+The market-adjusted model estimates a prior-date market level for log rate per
+mile, then predicts load-level residuals with LightGBM. It does not use target
+values from the prediction date. The chronological split is intentionally conservative because the production
 prediction set is later in time than the development observations. The model was
 selected on holdout MAE rather than training performance. Scaling is applied to
 linear and SVM models; tree and boosting models are not scaled because their split
-rules are insensitive to feature units. The final LightGBM holdout MAE after adding
-the fold-safe route-frequency feature was 110.97.
+rules are insensitive to feature units. The market-adjusted LightGBM holdout
+MAE was 98.77, compared with 110.97 for the regularized LightGBM baseline.
